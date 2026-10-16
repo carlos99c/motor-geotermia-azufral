@@ -9,88 +9,8 @@ import plotly.graph_objects as go
 from scipy import stats
 
 # =============================================================================
-# NOTAS DE VERSIÓN (v2) — cambios respecto al script original
-# -----------------------------------------------------------------------------
-# Se añaden 6 mejoras metodológicas solicitadas, preservando la arquitectura,
-# el flujo de la interfaz (sidebar -> validación -> motor -> dashboard) y el
-# estilo del script original:
-#   1) (retirada en la v8) Correlación entre variables vía Iman-Conover.
-#   2) Reporte del calor almacenado (Q) en Exajulios (EJ) como salida propia.
-#   3) Curva de probabilidad de excedencia (CDF invertida / "S-curve").
-#   4) Análisis de convergencia de la simulación (media y percentiles vs N).
-#   5) Método de verificación independiente (densidad de potencia, MWe/km²).
-#   6) Significancia estadística (p-valor) del coeficiente de Spearman.
-# La lógica de cálculo físico se separó en funciones puras (calcular_potencia,
-# calor_almacenado_EJ) para que sean testeables fuera de Streamlit, sin
-# reestructurar el resto del archivo.
-#
-# NOTAS DE VERSIÓN (v3) — mejoras inspiradas en Crystal Ball / Paucarani
-# -----------------------------------------------------------------------------
-#   7) Corrección de la distribución Normal: se reemplaza el recorte
-#      (np.clip) por una Normal Truncada real (scipy.stats.truncnorm), que
-#      no genera picos artificiales de probabilidad en los límites.
-#   8) Calculadora de "Certeza" (rango de probabilidad personalizado),
-#      equivalente al recurso homónimo de Crystal Ball.
-#   9) Vista alternativa de sensibilidad "Contribución a la Varianza (%)",
-#      calculada como en Crystal Ball (ρ² normalizado a 100%, con signo),
-#      para comparar en el mismo formato que el estudio de Paucarani.
-#  10) Gráfico de superposición (overlay) entre el método volumétrico y el
-#      método de verificación independiente (densidad de potencia).
-#
-# NOTAS DE VERSIÓN (v4) — generalización a otros sistemas geotérmicos
-# -----------------------------------------------------------------------------
-#  11) El nombre del sistema geotérmico es un parámetro (barra lateral y JSON):
-#      títulos, historial y nombres de archivo ya no dicen "Azufral" fijo.
-#  12) La comparación con antecedentes es opcional y editable: se muestra solo
-#      si se activa, y la lista vive en ANTECEDENTES_POR_DEFECTO o en la clave
-#      "antecedentes" del JSON. Se eliminó el texto que dictaminaba si los
-#      rangos de entrada "ameritan revisión": el motor no emite veredictos.
-#  13) Gráfico de sensibilidad: la vista principal muestra únicamente el
-#      coeficiente de Spearman (sin porcentajes), con etiquetas legibles fuera
-#      de las barras. La vista "Contribución a la Varianza (%)" queda oculta
-#      salvo que se cambie MOSTRAR_VISTA_CONTRIBUCION a True.
-#  15) Tarjetas KPI: se quitaron los rótulos "Probable", "Promedio" y "Máximo", que
-#      no corresponden a P90, P50 ni P10 (el máximo es otra fila de la tabla).
-#  14) La variable Tf se rotula "Temperatura de Referencia" (T0 del método
-#      volumétrico), no "de rechazo". Los nombres de columna del CSV no
-#      cambian (Temp_Rechazo_C) para no romper análisis ya hechos con ellos.
-#
-# NOTAS DE VERSIÓN (v5) — configuración por defecto con respaldo documental
-# -----------------------------------------------------------------------------
-#  16) Solo cambian los tripletes que el software trae por defecto; el código de
-#      cálculo y la interfaz no se modificaron. Cada valor tiene su fuente en el
-#      comentario que acompaña a su línea (SGC = Servicio Geológico Colombiano,
-#      2021, "Actualización del modelo conceptual descriptivo del sistema
-#      geotérmico del Volcán Azufral"). Un archivo .json cargado desde la barra
-#      lateral sigue reemplazando estos valores, de modo que las configuraciones
-#      guardadas con la versión anterior reproducen los resultados anteriores.
-# =============================================================================
 
-#  17) (v6) Área por defecto 3-4-5 km² (antes 3-3-3): mínimo del SGC, máximo del análogo
-#      Sumikawa (Holmes y Dirkzwager, 2025) y moda como promedio (Halcon et al., 2021).
-#      Las demás variables no cambian respecto de la v5.
 
-#  18) (v7) CORRECCIÓN DE FÓRMULA: el factor de planta pasa al denominador (potencia = Q·Rf·η / (Pf·t)).
-#      Verificado: con los datos de Paucarani el caso base da 73.0116 MWe, igual al publicado por Flores et al. (2018).
-#      Las versiones anteriores daban 65.8929. Los resultados de v1-v6 no son comparables con los de la v7.
-
-#  19) (v8) Se RETIRÓ el módulo de correlación entre variables (Iman-Conover) y la casilla
-#      "Activar muestreo correlacionado": no se había verificado y no era necesario. El motor
-#      muestrea todas las variables de forma independiente, y esa independencia se comprueba
-#      sobre los datos exportados (matriz de correlación del objetivo 2). Un .json guardado
-#      con las claves de correlación de versiones anteriores se carga sin error: se ignoran.
-#      Los resultados son idénticos a los de la v7 con la correlación desactivada.
-
-#  20) (v9) CAMBIOS:
-#      - El archivo JSON ahora guarda y restaura la distribución elegida (clave "tipo_dist"); antes se perdía al recargar.
-#      - Histograma: se agrega la línea del P50 y las etiquetas de P90, P50 y P10 van en una franja libre sobre las barras.
-#      - Curva de excedencia: las etiquetas de los tres puntos van debajo de la curva, con guía, y la figura lleva título.
-#      - Tema de color: fondo azul-gris suave, gráficos y tablas sobre paneles blancos, texto oscuro de alto contraste.
-#      - Todas las figuras comparten un estilo común (función estilo_figura) y se muestran sin el tema de Streamlit (theme=None).
-#      - Redacción: «validación cruzada» pasa a «contraste cruzado», coherente con el informe (verificación frente a validación).
-#      - Versión web: al abrir la página se ejecuta sola la configuración documentada (no queda la pantalla vacía) y se agrega
-#        una guía corta para el jurado; la línea AUTORIA permite mostrar el nombre del autor bajo el título.
-#      Los resultados numéricos son idénticos a los de la v8.
 
 # --- OPCIONES DE VISUALIZACIÓN ---
 MOSTRAR_VISTA_CONTRIBUCION = False   # True reactiva la vista de porcentajes
@@ -399,24 +319,7 @@ with st.sidebar:
 # --- MOTOR DE SIMULACIÓN MONTE CARLO ---
 # =============================================================================
 def generar_vector(dist_type, v_min, v_mod, v_max, n_samples):
-    # --- CORRECCIÓN (bug detectado en prueba de validación con Paucarani) ---
-    # La versión original solo comparaba v_min == v_max para decidir si la
-    # variable era constante, y luego recortaba la moda con np.clip(v_mod,
-    # v_min, v_max). Eso es correcto cuando los tres valores del triplete
-    # son iguales (p. ej. Densidad del Fluido = 926/926/926), pero falla
-    # cuando min y max coinciden entre sí pero la moda es distinta (p. ej.
-    # Rf = 0.10/0.15/0.10 o Pf = 0.90/0.95/0.90, como en el caso de
-    # Paucarani): la variable se trataba como constante, y aunque no lo
-    # fuera, el recorte posterior forzaba la moda de vuelta a ese mismo
-    # valor, descartando en silencio la moda ingresada por el usuario.
-    # Se corrige en dos pasos: (1) solo se trata como constante si los TRES
-    # valores del triplete coinciden; y (2) en vez de recortar la moda hacia
-    # un rango que podría no contenerla, se amplía el límite que corresponda
-    # (mínimo o máximo) para que el rango sí incluya la moda, preservando así
-    # el valor que el usuario realmente ingresó. Para cualquier triplete ya
-    # bien formado (mín <= moda <= máx, como en todas las variables de
-    # Azufral), esta ampliación no cambia nada: el mínimo y el máximo quedan
-    # exactamente igual que antes.
+  
     if v_min == v_max == v_mod:
         return np.full(n_samples, v_min)
 
@@ -426,15 +329,7 @@ def generar_vector(dist_type, v_min, v_mod, v_max, n_samples):
     if dist_type == "Triangular":
         return np.random.triangular(v_min, v_mod, v_max, n_samples)
     elif dist_type == "Normal":
-        # --- CORRECCIÓN (hallazgo adicional, distribución Normal) ---
-        # La versión original generaba una normal completa y le aplicaba
-        # np.clip(): esto no es una normal truncada, sino un "aplastamiento"
-        # que apila artificialmente probabilidad exactamente en los límites
-        # min/max (un pico ficticio que no existe en la distribución real).
-        # Se reemplaza por scipy.stats.truncnorm, que sí redistribuye la
-        # masa de probabilidad correctamente dentro de [min, max], de modo
-        # que el área bajo la curva truncada integre a 1 sin picos falsos
-        # en los bordes.
+        
         std = (v_max - v_min) / 6 if v_max > v_min else 0.0001
         a = (v_min - v_mod) / std
         b = (v_max - v_mod) / std
@@ -444,11 +339,7 @@ def generar_vector(dist_type, v_min, v_mod, v_max, n_samples):
 
 
 # -----------------------------------------------------------------------
-# NUEVO (Vacío 7, parcial): funciones puras de cálculo físico, separadas
-# de la lógica reactiva de Streamlit para que sean testeables de forma
-# independiente (p. ej. con pytest) sin depender de session_state ni de
-# la interfaz. No se reestructura el resto del archivo: siguen viviendo
-# en el mismo script y se invocan igual que antes.
+
 # -----------------------------------------------------------------------
 def calcular_potencia_y_calor(A, h, Tr, Tf, Cr, Cf, rho_r, rho_f, Phi, Rf, eta, Pf, vida_util):
     """Ecuación volumétrica USGS (heat-in-place). Retorna potencia (MWe),
